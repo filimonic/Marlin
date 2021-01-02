@@ -27,14 +27,23 @@
 #include "../gcode.h"
 #include "../../sd/cardreader.h"
 
+#if ENABLED(DMA_FILE_TRANSFER)
+  #include "../../feature/dma_ft/dma_ft.h"
+#endif
+
 #if HAS_MULTI_SERIAL
   #include "../queue.h"
 #endif
+
+#define DEBUG_OUT EITHER(MARLIN_DEV_MODE, DEBUG_DMAFT)
+#include "../../core/debug_out.h"
 
 /**
  * M28: Start SD Write
  */
 void GcodeSuite::M28() {
+
+  // TODO: Patch this to support both BINARY_FILE_TRANSFER and DMA_FILE_TRANSFER modes simultaneously
 
   #if ENABLED(BINARY_FILE_TRANSFER)
 
@@ -55,8 +64,30 @@ void GcodeSuite::M28() {
       card.openFileWrite(p);
 
   #else
+    #if ENABLED(DMA_FILE_TRANSFER)
+      bool dma_transfer_mode = false;
+      char *p = parser.string_arg;
+      if (p[0] == 'D' && NUMERIC(p[1])) {
+        dma_transfer_mode = p[1] > '0';
+        p += 2;
+        while (*p == ' ') ++p;
+      }
 
-    card.openFileWrite(parser.string_arg);
+      // DMA transfer mode
+      if ((card.flag.dma_transfer_mode = dma_transfer_mode)) {
+        const int16_t command_port = queue.command_port();
+        DEBUG_ECHOLNPAIR("M28: requested DMA FT over Command Port ", command_port);
+        bool uart_dma_available = DMAFileTransfer::is_command_port_available_for_dma(command_port);
+        DEBUG_ECHOLNPAIR("M28: DMA available: ", (uart_dma_available == true ? "True" : "False"));
+        TERN_(HAS_MULTI_SERIAL, card.transfer_port_index = command_port);
+        bool res = DMAFileTransfer::receive_file(command_port, p);
+        DEBUG_ECHOLNPAIR("M28: DMA complete: ", res);
+      }
+      else
+        card.openFileWrite(p);
+    #else
+      card.openFileWrite(parser.string_arg);
+    #endif
 
   #endif
 }
