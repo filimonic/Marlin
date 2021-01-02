@@ -2267,9 +2267,16 @@ static_assert(hbm[Z_AXIS] >= 0, "HOMING_BUMP_MM.Z must be greater than or equal 
     #warning "Either disable SDCARD_READONLY or disable POWER_LOSS_RECOVERY."
   #elif ENABLED(BINARY_FILE_TRANSFER)
     #warning "Either disable SDCARD_READONLY or disable BINARY_FILE_TRANSFER."
+  #elif ENABLED(DMA_FILE_TRANSFER)
+    #warning "Either disable SDCARD_READONLY or disable DMA_FILE_TRANSFER."
   #elif ENABLED(SDCARD_EEPROM_EMULATION)
     #warning "Either disable SDCARD_READONLY or disable SDCARD_EEPROM_EMULATION."
   #endif
+#endif
+
+// TODO: Remove this after add support simultaneously both in M28_M29.cpp
+#if BOTH(BINARY_FILE_TRANSFER, DMA_FILE_TRANSFER)
+  #error "BINARY_FILE_TRANSFER and DMA_FILE_TRANSFER can not be enabled together (this should be fixed)"
 #endif
 
 #if ENABLED(SD_IGNORE_AT_STARTUP)

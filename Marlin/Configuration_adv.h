@@ -1385,6 +1385,9 @@
   // Add an optimized binary file transfer mode, initiated with 'M28 B1'
   //#define BINARY_FILE_TRANSFER
 
+  // Add ability for DMA file transfer through "M28 D1 filename.gco"
+  #define DMA_FILE_TRANSFER
+
   /**
    * Set this option to one of the following (or the board's defaults apply):
    *

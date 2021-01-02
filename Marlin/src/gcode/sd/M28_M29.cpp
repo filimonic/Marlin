@@ -36,6 +36,8 @@
  */
 void GcodeSuite::M28() {
 
+  // TODO: Patch this to support both BINARY_FILE_TRANSFER and DMA_FILE_TRANSFER modes simultaneously
+
   #if ENABLED(BINARY_FILE_TRANSFER)
 
     bool binary_mode = false;
@@ -55,8 +57,27 @@ void GcodeSuite::M28() {
       card.openFileWrite(p);
 
   #else
+    #if ENABLED(DMA_FILE_TRANSFER)
+      bool dma_transfer_mode = false;
+      char *p = parser.string_arg;
+      if (p[0] == 'D' && NUMERIC(p[1])) {
+        dma_transfer_mode = p[1] > '0';
+        p += 2;
+        while (*p == ' ') ++p;
+      }
 
-    card.openFileWrite(parser.string_arg);
+      // DMA transfer mode
+      if ((card.flag.dma_transfer_mode = dma_transfer_mode)) {
+        SERIAL_ECHOLNPAIR("Switching to DMA FT over Serial", queue.command_port());
+        SERIAL_ECHOLNPAIR("Switching to DMA FT over Serial", queue.command_port());
+        TERN_(HAS_MULTI_SERIAL, card.transfer_port_index = queue.command_port());
+
+      }
+      else
+        card.openFileWrite(p);
+    #else
+      card.openFileWrite(parser.string_arg);
+    #endif
 
   #endif
 }

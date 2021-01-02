@@ -54,6 +54,9 @@ typedef struct {
        #if ENABLED(BINARY_FILE_TRANSFER)
          , binary_mode:1
        #endif
+       #if ENABLED(DMA_FILE_TRANSFER)
+         , dma_transfer_mode:1
+       #endif
     ;
 } card_flags_t;
 
@@ -63,8 +66,8 @@ public:
   static char filename[FILENAME_LENGTH],            // DOS 8.3 filename of the selected item
               longFilename[LONG_FILENAME_LENGTH];   // Long name of the selected item
 
-  // Fast! binary file transfer
-  #if ENABLED(BINARY_FILE_TRANSFER)
+  // Fast! Binary or DMA file transfer
+  #if EITHER(BINARY_FILE_TRANSFER, DMA_FILE_TRANSFER)
     #if HAS_MULTI_SERIAL
       static int8_t transfer_port_index;
     #else
