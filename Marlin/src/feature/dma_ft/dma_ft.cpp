@@ -33,7 +33,7 @@
   }
 
   bool DMAFileTransfer::is_command_port_available_for_dma(const int16_t command_port) {
-    return is_uart_available_for_dma(command_port_index_to_uart_index(command_port));
+    return dmaserial_available_on_port(command_port_index_to_uart_index(command_port));
   }
 
   void DMAFileTransfer::reset_timeout() {
@@ -43,7 +43,7 @@
 
   bool DMAFileTransfer::is_timeout_exceed() {
     uint32_t cm = getCurrentMillis();
-    MYSERIAL0.printf("CheckTimeoutExceed timeout_start=%lu PORT_TIMEOUT=%lu cm=%lu\n",timeout_start,DMAFT_TRANSFER_PORT_TIMEOUT,cm);
+    // MYSERIAL0.printf("CheckTimeoutExceed timeout_start=%lu PORT_TIMEOUT=%lu cm=%lu\n",timeout_start,DMAFT_TRANSFER_PORT_TIMEOUT,cm);
     // Fixes possible overflow on getCurrentMillis();
     return (cm - timeout_start) > DMAFT_TRANSFER_PORT_TIMEOUT;
   }
@@ -62,7 +62,7 @@
     if (!card.isMounted()) {
       card.mount();
       if (!card.isMounted()) {
-        SERIAL_ERROR_MSG("Could not mound sd");
+        SERIAL_ERROR_MSG("Could not mount sd");
         return false;
       }
     }
@@ -95,44 +95,70 @@
 
     memcpy(&_dmaft_tx_packet_buffer[bytes_filled], payload, payload_length);
     bytes_filled += payload_length;
-    uint32_t checksum = calculate_checksum(_dmaft_tx_packet_buffer, payload_length + 3);
-    memcpy(&_dmaft_tx_packet_buffer[bytes_filled], &checksum, sizeof(checksum));
-    bytes_filled += sizeof(checksum);
+    //uint32_t checksum = calculate_checksum(_dmaft_tx_packet_buffer, payload_length + 3);
+    //MYSERIAL0.printf(".. checksum = %u\n", checksum);
+    //memcpy(&_dmaft_tx_packet_buffer[bytes_filled], &checksum, sizeof(checksum));
+    //bytes_filled += sizeof(checksum);
+    //_dmaft_tx_packet_buffer[bytes_filled] = '\n';
+    //bytes_filled++;
     data_length = bytes_filled;
+
     return _dmaft_tx_packet_buffer;
   }
 
-  void DMAFileTransfer::write_packet(MarlinSerial* mSerial, uint8_t packet_type, const uint8_t* const payload, uint16_t payload_length)
+  void DMAFileTransfer::write_packet(MarlinSerial* mSerial, uint8_t packet_type, const uint8_t* const payload, uint16_t payload_length, bool wait)
   {
+    MYSERIAL0.printf("write_packet payload[0] = %u \n", payload[0]);
+    MYSERIAL0.printf("write_packet payload[1] = %u \n", payload[1]);
+    MYSERIAL0.printf("write_packet payload[2] = %u \n", payload[2]);
+    MYSERIAL0.printf("write_packet payload[3] = %u \n", payload[3]);
+    MYSERIAL0.printf("write_packet payload[4] = %u \n", payload[4]);
     uint16_t data_length = 0;
     const uint8_t* const data = create_packet(packet_type, payload, payload_length, data_length);
-    mSerial->write(data, data_length);
+    MYSERIAL0.printf("write_packet dl = %u\n", data_length );
+    if (NULL != mSerial) {
+      mSerial->write(data, data_length);
+    } else {
+      dmaserial_write(data, data_length, wait);
+    }
   }
 
-  void DMAFileTransfer::write_dmaft_hello(MarlinSerial* mSerial) {
+  void DMAFileTransfer::write_dmaft_hello(MarlinSerial* mSerial, bool wait=true) {
     /**
      * PT-HELLO:
      *    |        |        |        |        |        |
      *    |PROTOVER|CHKSTYPE|DMABUFSZ|CONNPROP|TIMEOUT |
      */
-    uint8_t payload[] = {
+
+/*     uint8_t payload[] = {
         DMAFT_PROTOCOL_VERSION,
         DMAFT_CHECKSUM_TYPE,
         DMAFT_BUFFER_SIZE_ID,
-        DMAFT_TRANSFER_PORT_OPTIONS,
-        DMAFT_TRANSFER_PORT_TIMEOUT_50MS };
-    write_packet(mSerial, DMAFT_PT_HELLO, payload, sizeof(payload));
+        DMAFT_TRANSFER_PORT_SPEED,
+        DMAFT_TRANSFER_PORT_TIMEOUT_50MS
+        }; */
+    mSerial->printf("DMAFT: PT-HELLO|PRV:%u|CHK:%s|BUF:%u|SPD:%lu|RTO:%lu|STO:%lu|\n",
+      DMAFT_PROTOCOL_VERSION,
+      get_checksum_name(),
+      DMAFT_BUFFER_SIZE,
+      DMAFT_TRANSFER_PORT_SPEED,
+      DMAFT_TRANSFER_PORT_TIMEOUT,
+      DMAFT_TRANSFER_PORT_TIMEOUT/2
+      );
+    //write_packet(mSerial, DMAFT_PT_HELLO, (uint8_t *)buf, buflen * sizeof(char), wait);
+    MYSERIAL0.printf("Sent DMAFT_PT_HELLO\n");
     //write_packet(mSerial, DMAFT_PT_RCPREADY, uint8_t[]{DMAFT_PROTOCOL_VERSION,  })
   }
 
-  void DMAFileTransfer::request_send_chunk(MarlinSerial* mSerial, const uint8_t chunk_id) {
+  void DMAFileTransfer::request_send_chunk(const uint8_t chunk_id, bool wait=true) {
     /**
      * PT-REQDATA
      *    |        |
      *    |CHUNK ID|
      */
     const uint8_t payload[] = {chunk_id};
-    write_packet(mSerial, DMAFT_PT_REQDATA, payload, sizeof(payload));
+    write_packet(NULL, DMAFT_PT_REQDATA, payload, sizeof(payload), wait);
+    MYSERIAL0.printf("Sent DMAFT_PT_REQDATA chunk_id=%u\n", chunk_id);
 
   }
 
@@ -147,6 +173,7 @@
     bool timeout_exceed = false;
     reset_timeout();
     while((!timeout_exceed) && (buffer[DMAFT_BUFFER_LAST_BYTE_IDX] == 0x00)) {
+      watchdog_refresh();
       safe_delay(50);
       timeout_exceed = is_timeout_exceed();
     }
@@ -171,6 +198,7 @@
    *
    */
   uint8_t DMAFileTransfer::process_buffer(const uint8_t* buffer, const uint8_t expected_chunk_id) {
+    MYSERIAL0.printf("Process buffer chunkid=%hu\n", expected_chunk_id);
     if (!(buffer[0] == _dmaft_tx_packet_buffer[0] && buffer[1] == _dmaft_tx_packet_buffer[1] && buffer[DMAFT_BUFFER_LAST_BYTE_IDX] == (uint8_t)0x0B)) {
       return DMAFT_RESULT_BUF_FAILED_CPS;
     }
@@ -206,7 +234,7 @@
 
 
   bool DMAFileTransfer::receive_file(const int16_t command_port, char* path) {
-    MYSERIAL0.printf("dma_ft::receive_file cmd_port: %u\n", command_port);
+    MYSERIAL0.printf("dma_ft::receive_file cmd_port: %dh\n", command_port);
     MYSERIAL0.printf("dma_ft::receive_file file: %s\n", path);
     if (!is_command_port_available_for_dma(command_port)) {
        SERIAL_ERROR_MSG("this port does not support DMA");
@@ -236,30 +264,29 @@
     uint8_t process_buffer_result = DMAFT_RESULT_UNKNOWN_PT;
 
     //save_uart_state(uart_port_index);
+    uint32_t time_to_start_after = getCurrentMillis() + DMAFT_TRANSFER_PORT_TIMEOUT;
+    write_dmaft_hello(mSerial, true);
+    MYSERIAL0.write("HelloSent\n");
     mSerial->flush();
+    MYSERIAL0.write("Flush()\n");
     mSerial->end();
-    MYSERIAL0.write("SaveUartDone\n");
-    safe_delay(5000);
+    MYSERIAL0.write("SerialStopped\n");
 
-    write_dmaft_hello(mSerial);
-    MYSERIAL0.write("HelloDonde\n");
+    dmaserial_start(uart_port_index, DMAFT_TRANSFER_PORT_SPEED);
+    MYSERIAL0.write("dmaserial_start done\n");
 
-    MYSERIAL0.write("Flush done\n");
-    safe_delay(5000);
-    setup_uart_dma(uart_port_index);
-    MYSERIAL0.write("setup_uart_dma done\n");
-    safe_delay(5000);
-    watchdog_refresh();
+    // Wait for time_to_start_after before start.
+    // TODO: Here fix overflow conditions
+    while (time_to_start_after < getCurrentMillis()) {
+      watchdog_refresh();
+      safe_delay(50);
+    }
     bool not_first_chunk = false;
-
+    MYSERIAL0.write("BANG!\n");
     while(!transfer_complete && transfer_success) {
-      MYSERIAL0.write("LOOP");
       clean_dma_buffer((uint8_t *) _dmaft_buffers[current_buffer_index]);
-      MYSERIAL0.write("-A");
-      start_dma_receive_buffer(uart_port_index, (uint8_t *) _dmaft_buffers[current_buffer_index]);
-      MYSERIAL0.write("-B");
-      request_send_chunk(mSerial, chunk_id_being_requested);
-      MYSERIAL0.write("-C\n");
+      dmaserial_set_receive_buffer(uart_port_index, (uint8_t *) _dmaft_buffers[current_buffer_index]);
+      request_send_chunk(chunk_id_being_requested);
 
       // On first chunk we can not process prev buffer because it is empty;
       // Otherwise we process prev buffer while host is sending second one.
@@ -313,19 +340,13 @@
       }
       MYSERIAL0.write("LE\n");
     } //end of  while(!transfer_complete && transfer_success)
-    MYSERIAL0.write("Loop Out\n");
     watchdog_refresh();
-    safe_delay(5000);
-    card.closefile();
-    MYSERIAL0.write("File closed\n");
-    //restore_uart_state(uart_port_index);
+    dmaserial_stop();
     mSerial->begin(BAUDRATE);
     MYSERIAL0.write("Serial returned to normal function\n");
-    safe_delay(5000);
-    safe_delay(DMAFT_TRANSFER_PORT_TIMEOUT/4);
-    mSerial->flush();
-    MYSERIAL0.write("Serial flushed\n");
-    safe_delay(5000);
+    safe_delay(200);
+    card.closefile();
+    MYSERIAL0.write("File closed\n");
 
     if (!transfer_success) {
       card.removeFile(card.filename);
@@ -333,10 +354,23 @@
     }
     ui.set_status((char *)DMAFT_STR_FINISH);
 
-    safe_delay(DMAFT_TRANSFER_PORT_TIMEOUT/4);
     MYSERIAL0.printf("dma_ft::receive_file finished with code %u", process_buffer_result);
     return transfer_success;
 
   }
+
+/*   uint32_t DMAFileTransfer::get_baudrate_from_transfer_option(const uint8_t dmaft_transfer_port_options) {
+    switch (dmaft_transfer_port_options & 0x0F) {
+      case DMAFT_XFER_SPD_2400_BAUD    : return 2400;
+      case DMAFT_XFER_SPD_115200_BAUD  : return 115200;
+      case DMAFT_XFER_SPD_230400_BAUD  : return 230400;
+      case DMAFT_XFER_SPD_460800_BAUD  : return 460800;
+      case DMAFT_XFER_SPD_921600_BAUD  : return 921600;
+      case DMAFT_XFER_SPD_1958400_BAUD : return 1958400;
+      case DMAFT_XFER_SPD_2250000_BAUD : return 2250000;
+      default:
+        return 0;
+    }
+  } */
 
 #endif

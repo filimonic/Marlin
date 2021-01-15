@@ -29,6 +29,8 @@
       #warning "!!!"
     #endif
 
+    // TODO ADD WARNING FOR DMAFT_XFER_SPD_4500000_BAUD available on UART1 only
+
   #else
     #error "DMA_FILE_TRANSFER does not support your MCU"
   #endif
