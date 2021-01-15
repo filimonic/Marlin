@@ -60,9 +60,10 @@
     // PER-PLATFORM, see dma_ft_mcu*.cpp
     static void                 start_dma_receive_buffer(const uint8_t uart_port_index, uint8_t* buffer);
     static bool                 is_uart_available_for_dma(const uint8_t uart_port_index);
-    static void                 save_uart_state(const uint8_t uart_port_index);
     static void                 setup_uart_dma(const uint8_t uart_port_index);
-    static void                 restore_uart_state(const uint8_t uart_port_index);
+    //static void                 save_uart_state(const uint8_t uart_port_index);
+    //static void                 restore_uart_state(const uint8_t uart_port_index);
+
 
     static uint8_t              wait_buffer_received(const uint8_t uart_port_index, const uint8_t* buffer);
     static uint8_t              process_buffer(const uint8_t* buffer, const uint8_t expected_chunk_id);

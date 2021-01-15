@@ -20,6 +20,15 @@
       #warning "On STM32F1 devices DMA_FILE_TRANSFER is available only on USART1, USART2, USART3, USART4. Your SERIAL_PORT_2 does not support this feature."
     #endif
 
+    #if ENABLED(BAUD_RATE_GCODE)
+      #warning "!!!"
+      #warning "!!!"
+      #warning "BAUD_RATE_GCODE is partially incompatible with DMA_FILE_TRANSFER."
+      #warning "After DMA_FILE_TRANSFER completes, port will be restarted at default baud rate!"
+      #warning "!!!"
+      #warning "!!!"
+    #endif
+
   #else
     #error "DMA_FILE_TRANSFER does not support your MCU"
   #endif

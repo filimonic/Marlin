@@ -7,10 +7,6 @@
   #include "../../module/temperature.h"
   #include "../../lcd/marlinui.h"
 
-  #define DEBUG_OUT EITHER(MARLIN_DEV_MODE, DEBUG_DMAFT)
-  #include "../../core/debug_out.h"
-
-
 
   // DMA File Transfer Buffers
   volatile uint8_t __attribute__ ((aligned (4))) _dmaft_buf0[DMAFT_BUFFER_SIZE];
@@ -18,6 +14,7 @@
   volatile uint8_t* _dmaft_buffers[2] = {_dmaft_buf0, _dmaft_buf1};
   uint8_t  _dmaft_tx_packet_buffer[64] = {0x52, 0x21}; //0x52, 0x21 is preamble
   char statusmsg[64];
+
 
   uint32_t DMAFileTransfer::timeout_start;
 
@@ -41,10 +38,14 @@
 
   void DMAFileTransfer::reset_timeout() {
     timeout_start = getCurrentMillis();
+    MYSERIAL0.printf("ResetTimeout timeout_start=%lu\n",timeout_start);
   }
 
   bool DMAFileTransfer::is_timeout_exceed() {
-    return (timeout_start + DMAFT_TRANSFER_PORT_TIMEOUT) > getCurrentMillis();
+    uint32_t cm = getCurrentMillis();
+    MYSERIAL0.printf("CheckTimeoutExceed timeout_start=%lu PORT_TIMEOUT=%lu cm=%lu\n",timeout_start,DMAFT_TRANSFER_PORT_TIMEOUT,cm);
+    // Fixes possible overflow on getCurrentMillis();
+    return (cm - timeout_start) > DMAFT_TRANSFER_PORT_TIMEOUT;
   }
 
   bool DMAFileTransfer::precheck_sd_and_file(char* path) {
@@ -205,8 +206,8 @@
 
 
   bool DMAFileTransfer::receive_file(const int16_t command_port, char* path) {
-    DEBUG_ECHOLNPAIR("dma_ft::receive_file cmd_port: ", command_port);
-    DEBUG_ECHOLNPAIR("dma_ft::receive_file file: ", path);
+    MYSERIAL0.printf("dma_ft::receive_file cmd_port: %u\n", command_port);
+    MYSERIAL0.printf("dma_ft::receive_file file: %s\n", path);
     if (!is_command_port_available_for_dma(command_port)) {
        SERIAL_ERROR_MSG("this port does not support DMA");
       return false;
@@ -214,18 +215,17 @@
     if (!precheck_sd_and_file(path)) {
       return false;
     }
-    DEBUG_ECHOLN("dma_ft::receive_file checks passed");
+    MYSERIAL0.write("dma_ft::receive_file checks passed\n");
     // IMPORTANT: Disable all heaters before transferring data!
     thermalManager.disable_all_heaters();
     thermalManager.manage_heater();
-    DEBUG_ECHOLN("dma_ft::receive_file heaters disabled");
+    MYSERIAL0.write("dma_ft::receive_file heaters disabled\n");
     uint8_t uart_port_index = command_port_index_to_uart_index(command_port);
     MarlinSerial *mSerial = get_mSerial(command_port);
 
     ui.set_status((char *)DMAFT_STR_START);
     card.openFileWrite((char *)path);
-
-    DEBUG_ECHOLN("dma_ft::receive_file file opened");
+    MYSERIAL0.write("dma_ft::receive_file file opened\n");
 
     bool transfer_complete = false;
     bool transfer_success  = true;
@@ -235,31 +235,49 @@
     uint8_t retry_count = 0xFF;
     uint8_t process_buffer_result = DMAFT_RESULT_UNKNOWN_PT;
 
+    //save_uart_state(uart_port_index);
+    mSerial->flush();
+    mSerial->end();
+    MYSERIAL0.write("SaveUartDone\n");
+    safe_delay(5000);
+
     write_dmaft_hello(mSerial);
-    save_uart_state(uart_port_index);
+    MYSERIAL0.write("HelloDonde\n");
 
+    MYSERIAL0.write("Flush done\n");
+    safe_delay(5000);
     setup_uart_dma(uart_port_index);
-
+    MYSERIAL0.write("setup_uart_dma done\n");
+    safe_delay(5000);
+    watchdog_refresh();
     bool not_first_chunk = false;
 
     while(!transfer_complete && transfer_success) {
+      MYSERIAL0.write("LOOP");
       clean_dma_buffer((uint8_t *) _dmaft_buffers[current_buffer_index]);
+      MYSERIAL0.write("-A");
       start_dma_receive_buffer(uart_port_index, (uint8_t *) _dmaft_buffers[current_buffer_index]);
+      MYSERIAL0.write("-B");
       request_send_chunk(mSerial, chunk_id_being_requested);
+      MYSERIAL0.write("-C\n");
 
       // On first chunk we can not process prev buffer because it is empty;
       // Otherwise we process prev buffer while host is sending second one.
       if (not_first_chunk) {
         process_buffer_result = process_buffer((uint8_t *) _dmaft_buffers[1 - current_buffer_index], chunk_id_being_processed); // Process previous buffer
+        MYSERIAL0.printf("dma_ft::process_buffer exit code %u", process_buffer_result);
         switch (process_buffer_result)
         {
           case DMAFT_RESULT_OK:
+            MYSERIAL0.write("DMAFT_RESULT_OK\n");
             chunk_id_being_processed++;
             break;
           case DMAFT_RESULT_OK_FINISHED:
+            MYSERIAL0.write("DMAFT_RESULT_OK_FINISHED\n");
             transfer_complete = true;
             break;
           case DMAFT_RESULT_OK_ABORTED:
+            MYSERIAL0.write("DMAFT_RESULT_OK_ABORTED\n");
             transfer_success = false;
             transfer_complete = true;
             break;
@@ -267,13 +285,16 @@
           case DMAFT_RESULT_BUF_FAILED_CPS:
           case DMAFT_RESULT_UNEXPECTED_ID:
           case DMAFT_RESULT_UNKNOWN_PT:
+            MYSERIAL0.write("FAILED\n");
             retry_count--;
             chunk_id_being_requested = chunk_id_being_processed - 1;
             break;
           case DMAFT_RESULT_WRITE_FAILED:
+            MYSERIAL0.write("DMAFT_RESULT_WRITE_FAILED\n");
             transfer_success = false;
             transfer_complete = true;
           default:
+            MYSERIAL0.write("default\n");
             transfer_success = false;
             transfer_complete = true;
         } //end of switch (process_buffer_result)
@@ -290,20 +311,30 @@
         transfer_success = false;
         transfer_complete = true;
       }
+      MYSERIAL0.write("LE\n");
     } //end of  while(!transfer_complete && transfer_success)
-    restore_uart_state(uart_port_index);
-    safe_delay(DMAFT_TRANSFER_PORT_TIMEOUT/4);
-
+    MYSERIAL0.write("Loop Out\n");
+    watchdog_refresh();
+    safe_delay(5000);
     card.closefile();
-    DEBUG_ECHOLN("dma_ft::receive_file file closed");
+    MYSERIAL0.write("File closed\n");
+    //restore_uart_state(uart_port_index);
+    mSerial->begin(BAUDRATE);
+    MYSERIAL0.write("Serial returned to normal function\n");
+    safe_delay(5000);
+    safe_delay(DMAFT_TRANSFER_PORT_TIMEOUT/4);
+    mSerial->flush();
+    MYSERIAL0.write("Serial flushed\n");
+    safe_delay(5000);
+
     if (!transfer_success) {
-      DEBUG_ECHOLN("dma_ft::receive_file file removed");
       card.removeFile(card.filename);
+      MYSERIAL0.write("File removed\n");
     }
     ui.set_status((char *)DMAFT_STR_FINISH);
 
     safe_delay(DMAFT_TRANSFER_PORT_TIMEOUT/4);
-    DEBUG_ECHOLNPAIR("dma_ft::receive_file finished with code ", process_buffer_result);
+    MYSERIAL0.printf("dma_ft::receive_file finished with code %u", process_buffer_result);
     return transfer_success;
 
   }

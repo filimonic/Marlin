@@ -86,7 +86,7 @@
    * Save/Resote UART state
    */
 
-  void DMAFileTransfer::save_uart_state(const uint8_t uart_port_index) {
+/*   void DMAFileTransfer::save_uart_state(const uint8_t uart_port_index) {
     const USART_TypeDef* uart = _dmaft_stm32f1_get_usart_by_uart_idx(uart_port_index);
     memcpy((void*)_dmaft_uart_state, (void*)uart, _DMAFT_UART_STATE_SIZE);
   }
@@ -94,7 +94,7 @@
   void DMAFileTransfer::restore_uart_state(const uint8_t uart_port_index) {
     const USART_TypeDef* uart = _dmaft_stm32f1_get_usart_by_uart_idx(uart_port_index);
     memcpy((void*)uart, (void*)_dmaft_uart_state, _DMAFT_UART_STATE_SIZE);
-  }
+  } */
 
   void DMAFileTransfer::setup_uart_dma(const uint8_t uart_port_index) {
     USART_TypeDef* uart = _dmaft_stm32f1_get_usart_by_uart_idx(uart_port_index);
