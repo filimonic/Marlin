@@ -54,9 +54,6 @@ typedef struct {
        #if ENABLED(BINARY_FILE_TRANSFER)
          , binary_mode:1
        #endif
-       #if ENABLED(DMA_FILE_TRANSFER)
-         , dma_transfer_mode:1
-       #endif
     ;
 } card_flags_t;
 
@@ -103,6 +100,7 @@ public:
   // Basic file ops
   static void openFileRead(char * const path, const uint8_t subcall=0);
   static void openFileWrite(char * const path);
+  static void openFileWriteEx(char * const path, const uint32_t expected_filesize);
   static void closefile(const bool store_location=false);
   static bool fileExists(const char * const name);
   static void removeFile(const char * const name);
@@ -168,7 +166,7 @@ public:
   static inline char* getWorkDirName() { workDir.getDosName(filename); return filename; }
   static inline int16_t get() { int16_t out = (int16_t)file.read(); sdpos = file.curPosition(); return out; }
   static inline int16_t read(void* buf, uint16_t nbyte) { return file.isOpen() ? file.read(buf, nbyte) : -1; }
-  static inline int16_t write(void* buf, uint16_t nbyte) { return file.isOpen() ? file.write(buf, nbyte) : -1; }
+  static inline int16_t write(void* buf, uint16_t nbyte) { int16_t out = file.isOpen() ? (int16_t)file.write(buf, nbyte) : -1; sdpos = file.curPosition(); if(filesize < sdpos) {filesize = sdpos;}; return out; }
 
   static Sd2Card& getSd2Card() { return sd2card; }
 

@@ -659,6 +659,12 @@ void CardReader::openFileWrite(char * const path) {
   #endif
 }
 
+void CardReader::openFileWriteEx(char * const path, const uint32_t expected_filesize) {
+  if (file.isOpen()) return;
+  openFileWrite(path);
+  if (file.isOpen()) filesize = expected_filesize;
+}
+
 //
 // Check if a file exists by absolute or workDir-relative path
 // If the file exists, the long name can also be fetched.

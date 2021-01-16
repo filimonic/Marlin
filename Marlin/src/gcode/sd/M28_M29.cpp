@@ -74,7 +74,7 @@ void GcodeSuite::M28() {
       }
 
       // DMA transfer mode
-      if ((card.flag.dma_transfer_mode = dma_transfer_mode)) {
+      if (dma_transfer_mode) {
         const int16_t command_port = queue.command_port();
         DEBUG_ECHOLNPAIR("M28: requested DMA FT over Command Port ", command_port);
         bool uart_dma_available = DMAFileTransfer::is_command_port_available_for_dma(command_port);
@@ -82,9 +82,9 @@ void GcodeSuite::M28() {
         TERN_(HAS_MULTI_SERIAL, card.transfer_port_index = command_port);
         bool res = DMAFileTransfer::receive_file(command_port, p);
         DEBUG_ECHOLNPAIR("M28: DMA complete: ", res);
-      }
-      else
+      } else {
         card.openFileWrite(p);
+      }
     #else
       card.openFileWrite(parser.string_arg);
     #endif

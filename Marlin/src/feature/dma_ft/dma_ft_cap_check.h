@@ -9,6 +9,10 @@
 
 #if ENABLED(DMA_FILE_TRANSFER)
 
+  #if (DMAFT_BUFFER_SIZE % 4) != 0
+    #error "DMAFT_BUFFER_SIZE must be a multiple of 4"
+  #endif
+
   #ifdef STM32F1
     #if !HAS_MULTI_SERIAL && !WITHIN(SERIAL_PORT, 1, 4)
       #error "On STM32F1 devices DMA_FILE_TRANSFER is available only on USART1, USART2, USART3, USART4. Check your SERIAL_PORT or enable SERIAL_PORT_2 on supported port."
