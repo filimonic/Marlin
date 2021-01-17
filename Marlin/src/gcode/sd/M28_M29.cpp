@@ -42,54 +42,57 @@
  * M28: Start SD Write
  */
 void GcodeSuite::M28() {
+  char ftest[] = "FILETEST.GCO\0";
+  uint8_t fdat[DMAFT_BUFFER_SIZE];
+  for (int i = 0; i < DMAFT_BUFFER_SIZE; i++) {
+    fdat[i] = i && 0xFF;
+  }
+  card.openFileWrite(ftest);
+  card.write(fdat, DMAFT_BUFFER_SIZE);
+  card.write(fdat, DMAFT_BUFFER_SIZE);
+  card.write(fdat, DMAFT_BUFFER_SIZE);
+  card.write(fdat, DMAFT_BUFFER_SIZE);
+  card.closefile();
 
-  // TODO: Patch this to support both BINARY_FILE_TRANSFER and DMA_FILE_TRANSFER modes simultaneously
+  char* p = parser.string_arg;
+  // Trim end spaces
+  char* e = strchr(p, '\0');
+  while (*e == ' ') --e;
+  e[0] = '\0';
+  // Trim start spaces is unnecessarry
 
-  #if ENABLED(BINARY_FILE_TRANSFER)
-
-    bool binary_mode = false;
-    char *p = parser.string_arg;
-    if (p[0] == 'B' && NUMERIC(p[1])) {
-      binary_mode = p[1] > '0';
-      p += 2;
-      while (*p == ' ') ++p;
-    }
-
-    // Binary transfer mode
-    if ((card.flag.binary_mode = binary_mode)) {
-      SERIAL_ECHO_MSG("Switching to Binary Protocol");
-      TERN_(HAS_MULTI_SERIAL, card.transfer_port_index = queue.port[queue.index_r]);
-    }
-    else
+  #if ANY(BINARY_FILE_TRANSFER, DMA_FILE_TRANSFER)
+    // If arguments do not contain spaces, we assume this is filename, even if it starts with B or D.
+    // This means normal file transfer to SD card
+    if (strchr(p, ' ') == NULL) {
       card.openFileWrite(p);
-
-  #else
-    #if ENABLED(DMA_FILE_TRANSFER)
-      bool dma_transfer_mode = false;
-      char *p = parser.string_arg;
-      if (p[0] == 'D' && NUMERIC(p[1])) {
-        dma_transfer_mode = p[1] > '0';
-        p += 2;
+    }
+    #if ENABLED(BINARY_FILE_TRANSFER)
+      else if (strlen(p) >= 2 && p[0] == 'B' && NUMERIC(p[1])) { // Assume format "M28 B1 FILENAME"
+        card.flag.binary_mode = p[1] > '0' ;
+        p+=2;
         while (*p == ' ') ++p;
-      }
-
-      // DMA transfer mode
-      if (dma_transfer_mode) {
-        const int16_t command_port = queue.command_port();
-        DEBUG_ECHOLNPAIR("M28: requested DMA FT over Command Port ", command_port);
-        bool uart_dma_available = DMAFileTransfer::is_command_port_available_for_dma(command_port);
-        DEBUG_ECHOLNPAIR("M28: DMA available: ", (uart_dma_available == true ? "True" : "False"));
-        TERN_(HAS_MULTI_SERIAL, card.transfer_port_index = command_port);
-        bool res = DMAFileTransfer::receive_file(command_port, p);
-        DEBUG_ECHOLNPAIR("M28: DMA complete: ", res);
-      } else {
+        SERIAL_ECHO_MSG("Switching to Binary Protocol");
+        TERN_(HAS_MULTI_SERIAL, card.transfer_port_index = queue.port[queue.index_r]);
         card.openFileWrite(p);
       }
-    #else
-      card.openFileWrite(parser.string_arg);
-    #endif
+    #endif //ENABLED(BINARY_FILE_TRANSFER)
 
-  #endif
+    #if ENABLED(DMA_FILE_TRANSFER)
+      else if (strlen(p) >= 2 && p[0] == 'D' && NUMERIC(p[1])) {
+        uint32_t filesize = strtoul(&p[1], &p, 10);
+        while (*p == ' ') ++p;
+        SERIAL_ECHO_MSG("Switching to DMAFT Protocol");
+        DMAFTResult result = DMAFileTransfer::receive_file(queue.command_port(), p, filesize);
+        MYSERIAL0.printf("DMAFT Result: %u\n", result);
+      }
+    #endif // ENABLED(DMA_FILE_TRANSFER)
+    else {
+      card.openFileWrite(p);
+    }
+  #else // ANY(BINARY_FILE_TRANSFER, DMA_FILE_TRANSFER)
+    card.openFileWrite(p);
+  #endif // ANY(BINARY_FILE_TRANSFER, DMA_FILE_TRANSFER)
 }
 
 /**

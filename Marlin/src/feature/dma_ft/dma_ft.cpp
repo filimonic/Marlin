@@ -8,20 +8,18 @@
   #include "../../lcd/marlinui.h"
 
 
-  enum class __DMAFT_OTR : uint8_t {
-    UNKNOWN= 0x00,
-    FAILED = 0x01,
-    SUCCESS= 0x02,
-  };
-
-
   // DMA File Transfer Buffers
   volatile uint8_t __attribute__ ((aligned (4))) _dmaft_buf0[DMAFT_BUFFER_SIZE];
   volatile uint8_t __attribute__ ((aligned (4))) _dmaft_buf1[DMAFT_BUFFER_SIZE];
   volatile uint8_t* _dmaft_buffers[2] = {_dmaft_buf0, _dmaft_buf1};
-  uint8_t  _dmaft_tx_packet_buffer[64] = {0x52, 0x21}; //0x52, 0x21 is preamble
-  char statusmsg[64];
-
+  uint8_t  _dmaft_tx_packet_buffer[64] = {0xB7}; //0x52, 0x21 is preamble
+  // Buffer for status screen
+  // The simplest LCD supports 20 characters wide, so we need to fit here.
+  // Filename is maximum 8.3 characters long
+  // Percents are maximum 99
+  //                 "0123456789ABCDEF0123"
+  //                 ">> FILENAME.GCO: 99%"
+  char ui_status_msg[DMAFT_STR_STATUS_LINE_LEN];
 
   uint32_t DMAFileTransfer::timeout_start;
 
@@ -96,8 +94,8 @@
     // First two bytes are never changed
     //_dmaft_tx_packet_buffer[0] = 0x52;
     //_dmaft_tx_packet_buffer[1] = 0x21;
-    _dmaft_tx_packet_buffer[2] = packet_type;
-    bytes_filled += 3;
+    _dmaft_tx_packet_buffer[1] = packet_type;
+    bytes_filled += 2;
 
     memcpy(&_dmaft_tx_packet_buffer[bytes_filled], payload, payload_length);
     bytes_filled += payload_length;
@@ -140,6 +138,8 @@
       );
   }
 
+
+
   FORCE_INLINE void DMAFileTransfer::request_send_chunk(const uint8_t chunk_id) {
     /**
      * PT-REQDATA
@@ -163,7 +163,7 @@
    *  DMAFT_RESULT_TIMEOUT_EXCEED
    */
 
-  uint8_t DMAFileTransfer::wait_buffer_received(const uint8_t uart_port_index, const uint8_t* buffer) {
+  DMAFTResult DMAFileTransfer::wait_buffer_received(const uint8_t uart_port_index, const uint8_t* buffer) {
     bool timeout_exceed = false;
     const uint8_t* watch_addr = &buffer[DMAFT_BUFFER_LAST_BYTE_IDX];
     reset_timeout();
@@ -174,8 +174,8 @@
     }
 
     return timeout_exceed
-      ? DMAFT_RESULT_TIMEOUT_EXCEED
-      : DMAFT_RESULT_OK;
+      ? DMAFTResult::FAIL_TIMEOUT_EXCEED
+      : DMAFTResult::OK;
   }
 
   /**
@@ -193,59 +193,65 @@
    *    DMAFT_RESULT_UNKNOWN_PT     == Received unknown packet type
    *
    */
-  uint8_t DMAFileTransfer::process_buffer(const uint8_t* buffer, const uint8_t expected_chunk_id) {
-    if (!(buffer[0] == _dmaft_tx_packet_buffer[0] && buffer[1] == _dmaft_tx_packet_buffer[1] && buffer[DMAFT_BUFFER_LAST_BYTE_IDX] == (uint8_t)0x0B)) {
-      return DMAFT_RESULT_BUF_FAILED_CPS;
+  DMAFTResult DMAFileTransfer::process_buffer(const uint8_t* buffer, const uint8_t expected_chunk_id) {
+    if (!(buffer[0] == _dmaft_tx_packet_buffer[0]  && buffer[DMAFT_BUFFER_LAST_BYTE_IDX] == (uint8_t)0x0B)) {
+      return DMAFTResult::FAIL_NO_MANDATORY_BYTES;
     }
 
     uint32_t calculated_checksum = calculate_checksum((uint8_t *)buffer, DMAFT_BUFFER_SIZE - 5);
     if (calculated_checksum != *((uint32_t *)(&buffer[DMAFT_BUFFER_SIZE - 5]))) {
-      return DMAFT_RESULT_BUF_FAILED_CRC;
+      return DMAFTResult::FAIL_WRONG_CHECKSUM;
     }
 
-    uint8_t packet_type = buffer[2];
-    switch (packet_type)
-    {
+
+    uint8_t packet_type = buffer[1];
+    MYSERIAL0.printf("write::process_buffer PT %u\n", packet_type);
+    switch (packet_type) {
       case DMAFT_PT_CHUNK:
-        return expected_chunk_id != buffer[3]
-          ? DMAFT_RESULT_UNEXPECTED_ID
-          : card.write((void *)&buffer[4], DMAFT_BUFFER_SIZE - 9) == -1
-            ? DMAFT_RESULT_WRITE_FAILED
-            : DMAFT_RESULT_OK;
-      case DMAFT_PT_LASTCHUNK: {
-        const uint16_t data_size = *((uint16_t *)(&buffer[4]));
-        return expected_chunk_id != buffer[3]
-          ? DMAFT_RESULT_UNEXPECTED_ID
-          : card.write((void *)&buffer[6], data_size) == -1
-            ? DMAFT_RESULT_WRITE_FAILED
-            : DMAFT_RESULT_OK_FINISHED;
-      }
+        MYSERIAL0.printf("write::DMAFT_PT_CHUNK\n");
+        return expected_chunk_id != buffer[2]
+          ? DMAFTResult::FAIL_UNEXPECTED_ID
+          : card.write((void *)&buffer[3], DMAFT_BUFFER_SIZE - 8) == -1
+            ? DMAFTResult::FAIL_SD_WRITE_ERROR
+            : DMAFTResult::OK;
+      case DMAFT_PT_LENCHUNK:
+        MYSERIAL0.printf("write::DMAFT_PT_LENCHUNK\n");
+        return expected_chunk_id != buffer[2]
+          ? DMAFTResult::FAIL_UNEXPECTED_ID
+          : card.write((void *)&buffer[5], *((uint16_t *)&buffer[3])) == -1
+            ? DMAFTResult::FAIL_SD_WRITE_ERROR
+            : DMAFTResult::OK;
+      case DMAFT_PT_EOF:
+        MYSERIAL0.printf("write::DMAFT_PT_EOF\n");
+        return expected_chunk_id != buffer[2]
+          ? DMAFTResult::FAIL_UNEXPECTED_ID
+          : DMAFTResult::OK_FINISH;
       case DMAFT_PT_ABORTED:
-        return DMAFT_RESULT_OK_ABORTED;
+        return DMAFTResult::OK_ABORT;
       default:
-        return DMAFT_RESULT_UNKNOWN_PT;
+        return DMAFTResult::FAIL_UNKNOWN_PACKET_TYPE;
     }
   }
 
 
-  bool DMAFileTransfer::receive_file(const int16_t command_port, char* path) {
+  DMAFTResult DMAFileTransfer::receive_file(const int16_t command_port, char* path, uint32_t filesize) {
     if (!is_command_port_available_for_dma(command_port)) {
        SERIAL_ERROR_MSG("this port does not support DMA");
-      return false;
+      return DMAFTResult::FAIL_PORT_INCOMPATIBLE;
     }
     if (!precheck_sd_and_file(path)) {
-      return false;
+      return DMAFTResult::FAIL_DEVICE_NOT_READY;
     }
-    // IMPORTANT: Disable all heaters before transferring data!
+    // !IMPORTANT: Disable all heaters before transferring data!
     thermalManager.disable_all_heaters();
     thermalManager.manage_heater();
 
     uint8_t uart_port_index = command_port_index_to_uart_index(command_port);
     MarlinSerial *mSerial = get_mSerial(command_port);
 
-    ui.set_status((char *)DMAFT_STR_START);
+    ui.return_to_status();
     ui.update();
-    card.openFileWriteEx((char *)path, 10485760UL);
+    card.openFileWrite((char *)path, filesize);
 
     uint32_t time_to_start_after = getCurrentMillis() + DMAFT_TRANSFER_PORT_TIMEOUT;
     write_dmaft_hello(mSerial);
@@ -264,79 +270,76 @@
 
     uint8_t current_chunk_id = 0;
     uint8_t current_buffer_index = 1;
-    uint8_t result_process = DMAFT_RESULT_UNKNOWN;
-    uint8_t result_receive = DMAFT_RESULT_UNKNOWN;
-    __DMAFT_OTR xfer_result = __DMAFT_OTR::UNKNOWN;
+    bool receive_loop_complete = false;
+    DMAFTResult xfer_result = DMAFTResult::UNKNOWN;
 
-    while(xfer_result == __DMAFT_OTR::UNKNOWN) {
+    uint8_t percent_done_prev = 100; // This will force refresh
+    uint8_t percent_done_cur  = 0;
+
+    while(!receive_loop_complete) {
       current_buffer_index ^= 0x01; // This switches 0 to 1 or 1 to 0
       clean_dma_buffer((uint8_t *) _dmaft_buffers[current_buffer_index]);
       dmaserial_set_receive_buffer(uart_port_index, (uint8_t *) _dmaft_buffers[current_buffer_index]);
       request_send_chunk(current_chunk_id);
 
       if (not_first_chunk) {
-        result_process = process_buffer((uint8_t *)_dmaft_buffers[current_buffer_index ^ 0x01], current_chunk_id - 1);
-        if (result_process != DMAFT_RESULT_OK) {
-          switch (result_process)
+        xfer_result = process_buffer((uint8_t *)_dmaft_buffers[current_buffer_index ^ 0x01], current_chunk_id - 1);
+        if (xfer_result != DMAFTResult::OK) {
+          switch (xfer_result)
           {
-          case DMAFT_RESULT_OK_FINISHED:
-            //MYSERIAL0.printf("Xfer finished by host\n");
-            xfer_result = __DMAFT_OTR::SUCCESS;
-          case DMAFT_RESULT_OK_ABORTED:
-            //MYSERIAL0.printf("Xfer aborted by host\n");
-          default: // Errors here
-            //MYSERIAL0.printf("Xfer failed witch code %u\n", result_process);
-            xfer_result = __DMAFT_OTR::FAILED;
+          case DMAFTResult::OK_FINISH:
+          case DMAFTResult::OK_ABORT:
+          // Errors here
+          default:
+            receive_loop_complete = true;
             break;
           }
         }
       }
+            // Update on-screen status text
+      percent_done_cur = card.percentDone();
+      if (percent_done_cur != percent_done_prev) {
+        percent_done_prev = percent_done_cur;
+        snprintf(ui_status_msg, sizeof(ui_status_msg), DMAFT_STR_STATUS_LINE, percent_done_cur);
+        ui.set_status(ui_status_msg, false);
 
-      if (xfer_result == __DMAFT_OTR::UNKNOWN) {
-        result_receive = wait_buffer_received(uart_port_index, (uint8_t *)_dmaft_buffers[current_buffer_index]);
-        switch (result_receive) {
-          case DMAFT_RESULT_TIMEOUT_EXCEED:
-            xfer_result = __DMAFT_OTR::FAILED;
-            break;
-          case DMAFT_RESULT_OK: {
-            current_chunk_id++;
-          }
+      }
+      if (!ui.on_status_screen()) {
+        ui.goto_screen(ui.status_screen);
+      }
+      ui.update();
+
+      if (!receive_loop_complete) {
+        xfer_result = wait_buffer_received(uart_port_index, (uint8_t *)_dmaft_buffers[current_buffer_index]);
+        if (xfer_result != DMAFTResult::OK) {
+          receive_loop_complete = true;
+        }
+        else {
+          current_chunk_id++;
         }
       }
       not_first_chunk = true;
-      // Update status
-      snprintf(statusmsg, sizeof(statusmsg), "WF %lu, %u", card.getIndex(), card.percentDone());
-      ui.set_status(statusmsg, false);
-      ui.update();
+
+
     }
 
     watchdog_refresh();
     dmaserial_stop();
     mSerial->begin(BAUDRATE);
     safe_delay(200);
+    ui.reset_status(true);
+    ui.status_message[0] = '\0';
     card.closefile();
+    card.release();
+    card.mount();
 
-    if (xfer_result != __DMAFT_OTR::SUCCESS) {
+
+    if (xfer_result != DMAFTResult::OK_FINISH) {
       card.removeFile(card.filename);
     }
-    ui.set_status((char *)DMAFT_STR_FINISH);
-    ui.update();
 
-    return xfer_result == __DMAFT_OTR::SUCCESS;
+    return xfer_result;
 }
 
-/*   uint32_t DMAFileTransfer::get_baudrate_from_transfer_option(const uint8_t dmaft_transfer_port_options) {
-    switch (dmaft_transfer_port_options & 0x0F) {
-      case DMAFT_XFER_SPD_2400_BAUD    : return 2400;
-      case DMAFT_XFER_SPD_115200_BAUD  : return 115200;
-      case DMAFT_XFER_SPD_230400_BAUD  : return 230400;
-      case DMAFT_XFER_SPD_460800_BAUD  : return 460800;
-      case DMAFT_XFER_SPD_921600_BAUD  : return 921600;
-      case DMAFT_XFER_SPD_1958400_BAUD : return 1958400;
-      case DMAFT_XFER_SPD_2250000_BAUD : return 2250000;
-      default:
-        return 0;
-    }
-  } */
 
 #endif

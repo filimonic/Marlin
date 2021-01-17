@@ -632,7 +632,7 @@ inline void echo_write_to_file(const char * const fname) {
 //
 // Open a file by DOS path for write
 //
-void CardReader::openFileWrite(char * const path) {
+void CardReader::openFileWrite(char * const path, const uint32_t expected_filesize) {
   if (!isMounted()) return;
 
   announceOpen(2, path);
@@ -649,6 +649,9 @@ void CardReader::openFileWrite(char * const path) {
   #else
     if (file.open(diveDir, fname, O_CREAT | O_APPEND | O_WRITE | O_TRUNC)) {
       flag.saving = true;
+      if (expected_filesize > 0) {
+        filesize = expected_filesize;
+      }
       selectFileByName(fname);
       TERN_(EMERGENCY_PARSER, emergency_parser.disable());
       echo_write_to_file(fname);
@@ -657,12 +660,6 @@ void CardReader::openFileWrite(char * const path) {
     else
       openFailed(fname);
   #endif
-}
-
-void CardReader::openFileWriteEx(char * const path, const uint32_t expected_filesize) {
-  if (file.isOpen()) return;
-  openFileWrite(path);
-  if (file.isOpen()) filesize = expected_filesize;
 }
 
 //

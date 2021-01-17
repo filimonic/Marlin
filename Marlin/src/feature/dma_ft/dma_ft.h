@@ -13,7 +13,7 @@
    * Baud
    * Recommended = 1958400U ( This is used at Makerbase Wi-Fi module)
    *
-   * Maximum safe speed on STM32F1 chip is 2250000U
+   * Maximum safe speed on STM32F1 chip is 2250000U for all UARTs
   **/
   #define DMAFT_TRANSFER_PORT_SPEED 1958400U
 
@@ -30,7 +30,7 @@
    * |   1958400 |    4096 |   140 |      +6 % |
    * |   1958400 |    6144 |   142 |      +2 % |
   **/
-  #define DMAFT_BUFFER_SIZE 4096
+  #define DMAFT_BUFFER_SIZE 512
 
   /**
    * DMA_FILE_TRANSFER checksum type for use in DMA mode
@@ -45,6 +45,22 @@
   #define DMAFT_TRANSFER_PORT_TIMEOUT 2000U // ms
   #define DMAFT_PROTOCOL_VERSION 0x01U //DMAFT Protocol version
   #define DMAFT_BUFFER_LAST_BYTE_IDX (DMAFT_BUFFER_SIZE - 1U)
+
+
+  enum class DMAFTResult : uint8_t {
+    UNKNOWN                 = 0x00, //  0
+    OK_FINISH               = 0x11, // 17
+    OK_ABORT                = 0x12, // 18
+    OK                      = 0x13, // 20
+    FAIL_NO_MANDATORY_BYTES = 0xA1, // 161
+    FAIL_WRONG_CHECKSUM     = 0xA2, // 162
+    FAIL_UNEXPECTED_ID      = 0xB1, // 177
+    FAIL_UNKNOWN_PACKET_TYPE= 0xB2, // 178
+    FAIL_TIMEOUT_EXCEED     = 0xC1, // 193
+    FAIL_SD_WRITE_ERROR     = 0xD1, // 209
+    FAIL_DEVICE_NOT_READY   = 0xD2, // 210
+    FAIL_PORT_INCOMPATIBLE  = 0xD3, // 211
+  };
 
   class DMAFileTransfer
   {
@@ -64,8 +80,8 @@
     static bool                 is_chunk_received(void *buffer);
     //static uint32_t             get_baudrate_from_transfer_option(const uint8_t dmaft_transfer_port_options);
 
-    static uint8_t              wait_buffer_received(const uint8_t uart_port_index, const uint8_t* buffer);
-    static uint8_t              process_buffer(const uint8_t* buffer, const uint8_t expected_chunk_id);
+    static DMAFTResult          wait_buffer_received(const uint8_t uart_port_index, const uint8_t* buffer);
+    static DMAFTResult          process_buffer(const uint8_t* buffer, const uint8_t expected_chunk_id);
 
     // PER-PLATFORM, see dma_ft_mcu*.cpp
     static bool                 dmaserial_available_on_port(const uint8_t uart_port_index);
@@ -82,7 +98,7 @@
 
   public:
     static bool                 is_command_port_available_for_dma(const int16_t command_port);
-    static bool                 receive_file(const int16_t command_port, char* path);
+    static DMAFTResult          receive_file(const int16_t command_port, char* path, uint32_t filesize);
 
   };
 
