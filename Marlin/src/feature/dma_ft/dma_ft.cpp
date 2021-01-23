@@ -205,24 +205,20 @@
 
 
     uint8_t packet_type = buffer[1];
-    MYSERIAL0.printf("write::process_buffer PT %u\n", packet_type);
     switch (packet_type) {
       case DMAFT_PT_CHUNK:
-        MYSERIAL0.printf("write::DMAFT_PT_CHUNK\n");
         return expected_chunk_id != buffer[2]
           ? DMAFTResult::FAIL_UNEXPECTED_ID
           : card.write((void *)&buffer[3], DMAFT_BUFFER_SIZE - 8) == -1
             ? DMAFTResult::FAIL_SD_WRITE_ERROR
             : DMAFTResult::OK;
       case DMAFT_PT_LENCHUNK:
-        MYSERIAL0.printf("write::DMAFT_PT_LENCHUNK\n");
         return expected_chunk_id != buffer[2]
           ? DMAFTResult::FAIL_UNEXPECTED_ID
           : card.write((void *)&buffer[5], *((uint16_t *)&buffer[3])) == -1
             ? DMAFTResult::FAIL_SD_WRITE_ERROR
             : DMAFTResult::OK;
       case DMAFT_PT_EOF:
-        MYSERIAL0.printf("write::DMAFT_PT_EOF\n");
         return expected_chunk_id != buffer[2]
           ? DMAFTResult::FAIL_UNEXPECTED_ID
           : DMAFTResult::OK_FINISH;

@@ -27,6 +27,8 @@
 
 #if ENABLED(SDSUPPORT)
 
+extern const char M23_STR[], M24_STR[];
+
 #if BOTH(SDCARD_SORT_ALPHA, SDSORT_DYNAMIC_RAM)
   #define SD_RESORT 1
 #endif
@@ -173,7 +175,6 @@ public:
       if(filesize < sdpos) {
         filesize = sdpos;
       }
-      MYSERIAL0.printf("cardreader::write out=%u filesize=%u sdpos=%u\n", out, filesize, sdpos);
       return out;
     } // write(void* buf, uint16_t nbyte)
 
