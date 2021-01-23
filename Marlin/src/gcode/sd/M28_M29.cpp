@@ -47,12 +47,22 @@ void GcodeSuite::M28() {
   for (int i = 0; i < DMAFT_BUFFER_SIZE; i++) {
     fdat[i] = i && 0xFF;
   }
+  card.removeFile(ftest);
   card.openFileWrite(ftest);
-  card.write(fdat, DMAFT_BUFFER_SIZE);
-  card.write(fdat, DMAFT_BUFFER_SIZE);
-  card.write(fdat, DMAFT_BUFFER_SIZE);
-  card.write(fdat, DMAFT_BUFFER_SIZE);
+  int16_t write = card.write(fdat, DMAFT_BUFFER_SIZE);
+  MYSERIAL0.printf("WRITE %d\n", write);
   card.closefile();
+
+  card.openFileRead(ftest);
+  MYSERIAL0.printf("FILESIZE %u\n", card.getFileSize());
+  int16_t read = card.read(fdat, DMAFT_BUFFER_SIZE/2);
+  MYSERIAL0.printf("READ %d\n", read);
+  read = card.read(fdat, DMAFT_BUFFER_SIZE/2);
+  MYSERIAL0.printf("READ %d\n", read);
+  read = card.read(fdat, DMAFT_BUFFER_SIZE/2);
+  MYSERIAL0.printf("READ %d\n", read);
+  card.closefile();
+  return;
 
   char* p = parser.string_arg;
   // Trim end spaces
